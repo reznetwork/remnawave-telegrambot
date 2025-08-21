@@ -20,10 +20,19 @@ func (h Handler) CreateCustomerIfNotExistMiddleware(next bot.HandlerFunc) bot.Ha
 		} else if update.CallbackQuery != nil {
 			telegramId = update.CallbackQuery.From.ID
 			langCode = update.CallbackQuery.From.LanguageCode
+		} else if update.PreCheckoutQuery != nil {
+			telegramId = update.PreCheckoutQuery.From.ID
+			langCode = update.PreCheckoutQuery.From.LanguageCode
 		}
+
+		if telegramId == 0 {
+			next(ctx, b, update)
+			return
+		}
+
 		existingCustomer, err := h.customerRepository.FindByTelegramId(ctx, telegramId)
 		if err != nil {
-			slog.Error("error finding customer by telegram id", err)
+			slog.Error("error finding customer by telegram id", "err", err)
 			return
 		}
 
@@ -33,7 +42,7 @@ func (h Handler) CreateCustomerIfNotExistMiddleware(next bot.HandlerFunc) bot.Ha
 				Language:   langCode,
 			})
 			if err != nil {
-				slog.Error("error creating customer", err)
+				slog.Error("error creating customer", "err", err)
 				return
 			}
 		} else {
@@ -43,7 +52,7 @@ func (h Handler) CreateCustomerIfNotExistMiddleware(next bot.HandlerFunc) bot.Ha
 
 			err = h.customerRepository.UpdateFields(ctx, existingCustomer.ID, updates)
 			if err != nil {
-				slog.Error("Error updating customer", err)
+				slog.Error("Error updating customer", "err", err)
 				return
 			}
 		}
