@@ -29,7 +29,24 @@ import (
 	"time"
 )
 
+func setupLogger() {
+	level := slog.LevelInfo
+	if l := strings.ToUpper(os.Getenv("SLOG_LEVEL")); l != "" {
+		switch l {
+		case "DEBUG":
+			level = slog.LevelDebug
+		case "WARN":
+			level = slog.LevelWarn
+		case "ERROR":
+			level = slog.LevelError
+		}
+	}
+	handler := slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: level})
+	slog.SetDefault(slog.New(handler))
+}
+
 func main() {
+	setupLogger()
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
 

@@ -13,6 +13,7 @@ import (
 
 	"remnawave-tg-shop-bot/internal/config"
 	"remnawave-tg-shop-bot/internal/database"
+	"remnawave-tg-shop-bot/utils"
 )
 
 func (h Handler) BuyCallbackHandler(ctx context.Context, b *bot.Bot, update *models.Update) {
@@ -138,6 +139,10 @@ func (h Handler) PaymentCallbackHandler(ctx context.Context, b *bot.Bot, update 
 
 	invoiceType := database.InvoiceType(callbackQuery["invoiceType"])
 
+	if invoiceType == database.InvoiceTypeTelegram {
+		slog.Debug("Payment callback received", "telegram_id", utils.MaskHalfInt64(callback.Chat.ID), "month", month)
+	}
+
 	var price int
 	if invoiceType == database.InvoiceTypeTelegram {
 		price = config.StarsPrice(month)
@@ -157,11 +162,17 @@ func (h Handler) PaymentCallbackHandler(ctx context.Context, b *bot.Bot, update 
 		return
 	}
 
+	slog.Debug("Customer loaded for payment", "customer_id", utils.MaskHalfInt64(customer.ID))
+
 	ctxWithUsername := context.WithValue(ctx, "username", update.CallbackQuery.From.Username)
 	paymentURL, purchaseId, err := h.paymentService.CreatePurchase(ctxWithUsername, float64(price), month, customer, invoiceType)
 	if err != nil {
 		slog.Error("Error creating payment", err)
 		return
+	}
+
+	if invoiceType == database.InvoiceTypeTelegram {
+		slog.Debug("Telegram Stars purchase created", "purchase_id", utils.MaskHalfInt64(purchaseId))
 	}
 
 	langCode := update.CallbackQuery.From.LanguageCode
@@ -183,9 +194,14 @@ func (h Handler) PaymentCallbackHandler(ctx context.Context, b *bot.Bot, update 
 		return
 	}
 	h.cache.Set(purchaseId, message.ID)
+
+	if invoiceType == database.InvoiceTypeTelegram {
+		slog.Debug("Sent Telegram Stars payment link", "purchase_id", utils.MaskHalfInt64(purchaseId))
+	}
 }
 
 func (h Handler) PreCheckoutCallbackHandler(ctx context.Context, b *bot.Bot, update *models.Update) {
+	slog.Debug("Answering pre-checkout query", "id", update.PreCheckoutQuery.ID)
 	_, err := b.AnswerPreCheckoutQuery(ctx, &bot.AnswerPreCheckoutQueryParams{
 		PreCheckoutQueryID: update.PreCheckoutQuery.ID,
 		OK:                 true,
@@ -203,6 +219,8 @@ func (h Handler) SuccessPaymentHandler(ctx context.Context, b *bot.Bot, update *
 		slog.Error("Error parsing purchase id", err)
 		return
 	}
+
+	slog.Debug("Successful Telegram Stars payment", "purchase_id", utils.MaskHalfInt64(int64(purchaseId)))
 
 	ctxWithUsername := context.WithValue(ctx, "username", username)
 	err = h.paymentService.ProcessPurchaseById(ctxWithUsername, int64(purchaseId))
