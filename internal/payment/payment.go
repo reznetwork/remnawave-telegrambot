@@ -55,6 +55,7 @@ func NewPaymentService(
 }
 
 func (s PaymentService) ProcessPurchaseById(ctx context.Context, purchaseId int64) error {
+	slog.Debug("Processing purchase", "purchase_id", utils.MaskHalfInt64(purchaseId))
 	purchase, err := s.purchaseRepository.FindById(ctx, purchaseId)
 	if err != nil {
 		return err
@@ -63,6 +64,7 @@ func (s PaymentService) ProcessPurchaseById(ctx context.Context, purchaseId int6
 		return fmt.Errorf("purchase with crypto invoice id %d not found", utils.MaskHalfInt64(purchaseId))
 	}
 
+	slog.Debug("Purchase loaded", "status", purchase.Status, "type", purchase.InvoiceType)
 	customer, err := s.customerRepository.FindById(ctx, purchase.CustomerID)
 	if err != nil {
 		return err
@@ -78,6 +80,8 @@ func (s PaymentService) ProcessPurchaseById(ctx context.Context, purchaseId int6
 		})
 		if err != nil {
 			slog.Error("Error deleting message", err)
+		} else {
+			slog.Debug("Deleted pending payment message", "message_id", messageId)
 		}
 	}
 
@@ -86,10 +90,14 @@ func (s PaymentService) ProcessPurchaseById(ctx context.Context, purchaseId int6
 		return err
 	}
 
+	slog.Debug("Remnawave user updated", "customer_id", utils.MaskHalfInt64(customer.ID))
+
 	err = s.purchaseRepository.MarkAsPaid(ctx, purchase.ID)
 	if err != nil {
 		return err
 	}
+
+	slog.Debug("Purchase marked as paid", "purchase_id", utils.MaskHalfInt64(purchase.ID))
 
 	customerFilesToUpdate := map[string]interface{}{
 		"subscription_link": user.SubscriptionUrl,
@@ -100,6 +108,8 @@ func (s PaymentService) ProcessPurchaseById(ctx context.Context, purchaseId int6
 	if err != nil {
 		return err
 	}
+
+	slog.Debug("Customer subscription updated", "customer_id", utils.MaskHalfInt64(customer.ID))
 
 	_, err = s.telegramBot.SendMessage(ctx, &bot.SendMessageParams{
 		ChatID: customer.TelegramID,
@@ -112,6 +122,8 @@ func (s PaymentService) ProcessPurchaseById(ctx context.Context, purchaseId int6
 		return err
 	}
 
+	slog.Debug("Sent subscription activation message", "telegram_id", utils.MaskHalfInt64(customer.TelegramID))
+
 	ctxReferee := context.Background()
 	referee, err := s.referralRepository.FindByReferee(ctxReferee, customer.TelegramID)
 	if referee == nil {
@@ -123,6 +135,7 @@ func (s PaymentService) ProcessPurchaseById(ctx context.Context, purchaseId int6
 	if err != nil {
 		return err
 	}
+	slog.Debug("Processing referral bonus", "referrer_id", utils.MaskHalfInt64(referee.ReferrerID))
 	refereeCustomer, err := s.customerRepository.FindByTelegramId(ctxReferee, referee.ReferrerID)
 	if err != nil {
 		return err
@@ -319,6 +332,7 @@ func (s PaymentService) createYookasaInvoice(ctx context.Context, amount float64
 }
 
 func (s PaymentService) createTelegramInvoice(ctx context.Context, amount float64, months int, customer *database.Customer) (url string, purchaseId int64, err error) {
+	slog.Debug("Creating Telegram Stars invoice", "customer_id", utils.MaskHalfInt64(customer.ID), "months", months, "amount", amount)
 	purchaseId, err = s.purchaseRepository.Create(ctx, &database.Purchase{
 		InvoiceType: database.InvoiceTypeTelegram,
 		Status:      database.PurchaseStatusNew,
@@ -331,6 +345,8 @@ func (s PaymentService) createTelegramInvoice(ctx context.Context, amount float6
 		slog.Error("Error creating purchase", err)
 		return "", 0, nil
 	}
+
+	slog.Debug("Telegram Stars purchase created", "purchase_id", utils.MaskHalfInt64(purchaseId))
 
 	invoiceUrl, err := s.telegramBot.CreateInvoiceLink(ctx, &bot.CreateInvoiceLinkParams{
 		Title:    s.translation.GetText(customer.Language, "invoice_title"),
@@ -345,6 +361,10 @@ func (s PaymentService) createTelegramInvoice(ctx context.Context, amount float6
 		Payload:     fmt.Sprintf("%d&%s", purchaseId, ctx.Value("username")),
 	})
 
+	if err == nil {
+		slog.Debug("Telegram invoice link created", "purchase_id", utils.MaskHalfInt64(purchaseId))
+	}
+
 	updates := map[string]interface{}{
 		"status": database.PurchaseStatusPending,
 	}
@@ -354,6 +374,8 @@ func (s PaymentService) createTelegramInvoice(ctx context.Context, amount float6
 		slog.Error("Error updating purchase", err)
 		return "", 0, err
 	}
+
+	slog.Debug("Purchase marked pending", "purchase_id", utils.MaskHalfInt64(purchaseId))
 
 	return invoiceUrl, purchaseId, nil
 }
